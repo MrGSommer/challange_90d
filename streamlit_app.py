@@ -13,7 +13,11 @@ if not URL or not KEY:
     st.stop()
 
 supabase = create_client(URL, KEY)
-# Wenn User-Token gespeichert, übernehme es für RLS-geschützte Requests
+# Setze vorhandene Session für RLS
+session = supabase.auth.get_session()
+token = session.get("access_token") if session else None
+if token:
+    supabase.postgrest.auth(token)# Wenn User-Token gespeichert, übernehme es für RLS-geschützte Requests
 token = st.session_state.get('auth_token')
 if token:
     supabase.postgrest.auth(token)
