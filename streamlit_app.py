@@ -86,6 +86,20 @@ if page == "Dashboard":
     st.title("Dashboard")
     if not uc:
         if st.button("Challenge starten"):
+            try:
+                new = get_table("user_challenges").insert({"user_id": user.id}).execute().data[0]
+                st.success("Challenge gestartet.")
+                st.rerun()
+            except APIError as err:
+                st.error(
+                    "Fehler: Berechtigung fehlt (RLS).
+" \
+                    "Bitte erstelle in Supabase für Tabelle 'user_challenges' folgende Policy:
+" \
+                    "`CREATE POLICY \"Allow authenticated insert\" ON public.user_challenges " \
+                    "FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);`")
+        st.stop()
+        if st.button("Challenge starten"):
             new = get_table("user_challenges").insert({"user_id": user.id}).execute().data[0]
             st.success("Challenge gestartet.")
             st.rerun()
