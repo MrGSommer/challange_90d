@@ -12,7 +12,7 @@ if "user" not in st.session_state:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Login"):
-            res = supabase.auth.sign_in({"email":email,"password":pwd})
+            res = supabase.auth.sign_in_with_password({"email":email,"password":pwd})
             if res.user: st.session_state.user = res.user
             else: st.error("Login fehlgeschlagen")
     with col2:
