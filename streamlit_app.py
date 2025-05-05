@@ -64,12 +64,15 @@ uc = uc_resp.data[0] if uc_resp.data else None
 
 # --------------- Load Exercise Metadata ---------------
 def load_exercise_info():
-    # exercise_details table should contain: exercise_id, description, focus, levels (JSON array)
-    res = get_table("exercise_details").select("exercise_id, description, focus, levels").execute()
+    # exercise_details table contains: exercise_id, level, description, focus
+    res = get_table("exercise_details").select("exercise_id, level, description, focus").execute()
     items = res.data if hasattr(res, 'data') else []
-    return {item['exercise_id']: item for item in items}
-
-exercise_info = load_exercise_info()
+    # map exercise_id to its detail record
+    return {item['exercise_id']: {
+                'level': item['level'],
+                'description': item['description'],
+                'focus': item['focus']
+            } for item in items}
 
 # --------------- Sidebar ---------------
 st.sidebar.write(f"Angemeldet als: {user.email}")
@@ -160,14 +163,12 @@ elif page == "Exercises":
     st.title("Alle Übungen")
     exs = get_table("exercises").select("id, name").execute().data or []
     for ex in exs:
+        ex_id = ex['id']
         name = ex['name']
-        info = exercise_info.get(ex['id'], {})
-        st.header(name)
+        info = exercise_info.get(ex_id, {})
+        st.header(f"{name} (Level {info.get('level', '?')})")
         st.write(info.get('description', 'Keine Beschreibung vorhanden.'))
         st.write("**Fokus:**", info.get('focus', ''))
-        levels = info.get('levels', [])
-        if levels:
-            st.write("**Level verfügbar:**", ', '.join(map(str, levels)))
         st.markdown("---")
 
 # --------------- History ---------------
