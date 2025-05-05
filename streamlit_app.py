@@ -31,7 +31,7 @@ page = st.sidebar.radio("Menü", ["Dashboard","Challenge","History","Logout"])
 if page=="Logout":
     supabase.auth.sign_out()
     st.session_state.clear()
-    st.experimental_rerun()
+    st.rerun()
 
 # —————————————————————————————————
 # 3) Dashboard
