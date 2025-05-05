@@ -195,16 +195,14 @@ if page == "Dashboard":
             else:
                 st.warning("Ausstehend")
                 if st.button("Jetzt durchführen"):
-                    # Query-Parameter für Navigation aktualisieren
-                    # Clear existing params und auf Challenge setzen
                     st.query_params.clear()
                     st.query_params.update({"page": "Challenge"})
-                    # Seite neuladen
                     st.rerun()
-                        page="Challenge"
-                    )
         else:
             st.info("Heute Ruhetag")
+
+
+
 
 # --------------- Challenge Page ---------------
 elif page == "Challenge":
