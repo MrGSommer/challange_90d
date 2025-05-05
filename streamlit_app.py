@@ -195,7 +195,7 @@ if page == "Dashboard":
             else:
                 st.warning("Ausstehend")
                 if st.button("Jetzt durchführen"):
-                    st.experimental_set_query_params(
+                    st.query_params(
                         page="Challenge"
                     )
         else:
