@@ -1,7 +1,7 @@
 import streamlit as st
 from supabase import create_client
-import time
 from postgrest import APIError
+import time
 import datetime
 import pandas as pd
 
@@ -63,14 +63,8 @@ uc_resp = get_table("user_challenges").select("id, current_day, paused_until, st
 uc = uc_resp.data[0] if uc_resp.data else None
 
 # --------------- Load Exercise Metadata ---------------
-def load_exercise_info():
-    # exercise_details table contains: exercise_id, level, description, focus
-    res = get_table("exercise_details").select("exercise_id, level, description, focus").execute()
-    items = res.data if hasattr(res, 'data') else []
-    return {item['exercise_id']: item for item in items}
-
-# assign metadata
-exercise_info = load_exercise_info()
+res = get_table("exercise_details").select("exercise_id, level, description, focus").execute()
+exercise_info = {item['exercise_id']: item for item in (res.data if hasattr(res, 'data') else [])}
 
 # --------------- Sidebar ---------------
 st.sidebar.write(f"Angemeldet als: {user.email}")
@@ -90,19 +84,13 @@ if page == "Dashboard":
                 new = get_table("user_challenges").insert({"user_id": user.id}).execute().data[0]
                 st.success("Challenge gestartet.")
                 st.rerun()
-            except APIError as err:
+            except APIError:
                 st.error(
-                    "Fehler: Berechtigung fehlt (RLS).
-" \
-                    "Bitte erstelle in Supabase für Tabelle 'user_challenges' folgende Policy:
-" \
-                    "`CREATE POLICY \"Allow authenticated insert\" ON public.user_challenges " \
-                    "FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);`")
-        st.stop()
-        if st.button("Challenge starten"):
-            new = get_table("user_challenges").insert({"user_id": user.id}).execute().data[0]
-            st.success("Challenge gestartet.")
-            st.rerun()
+                    "Fehler: Berechtigung fehlt (RLS).\n"
+                    "Bitte erstelle in Supabase für Tabelle 'user_challenges' folgende Policy:\n"
+                    "CREATE POLICY \"Allow authenticated insert\" ON public.user_challenges"
+                    " FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);"
+                )
         st.stop()
 
     st.markdown("---")
