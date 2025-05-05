@@ -19,18 +19,22 @@ st.set_page_config(page_title="90-Days Challenge MVP", layout="wide")
 if "user" not in st.session_state:
     st.header("Login / Register")
     email = st.text_input("E-Mail")
-    pwd = st.text_input("Passwort", type="password")
+    pwd   = st.text_input("Passwort", type="password")
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Login"):
-            res = supabase.auth.sign_in_with_password({"email": email, "password": pwd})
-           # supabase-auth liefert hier ein Session-Objekt mit access_token
-           if getattr(res, "session", None) and getattr(res, "user", None):
-               # JWT in die Header übernehmen, damit RLS auth.uid() stimmt
-               token = res.session.access_token
-               supabase.client._client.headers.update({"Authorization": f"Bearer {token}"})
-               st.session_state.user = res.user
-               st.rerun()
+            auth_res = supabase.auth.sign_in_with_password(
+                {"email": email, "password": pwd}
+            )
+            session = getattr(auth_res, "session", None)
+            userobj = getattr(auth_res, "user", None)
+            if session and userobj:
+                # Token in Header setzen
+                supabase.client._client.headers.update({
+                    "Authorization": f"Bearer {session.access_token}"
+                })
+                st.session_state.user = userobj
+                st.rerun()
             else:
                 st.error("Login fehlgeschlagen.")
                 
