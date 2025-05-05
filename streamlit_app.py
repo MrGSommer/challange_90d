@@ -21,7 +21,7 @@ if "user" not in st.session_state:
             auth_res = supabase.auth.sign_in_with_password({"email": email, "password": pwd})
             if getattr(auth_res, 'user', None):
                 st.session_state.user = auth_res.user
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Login fehlgeschlagen")
     with col2:
@@ -56,7 +56,7 @@ page = st.sidebar.radio("Menü", ["Dashboard", "Challenge", "History", "Logout"]
 if page == "Logout":
     supabase.auth.sign_out()
     st.session_state.clear()
-    st.experimental_rerun()
+    st.rerun()
 
 # --------------- Dashboard ---------------
 if page == "Dashboard":
@@ -79,7 +79,7 @@ elif page == "Challenge":
         if st.button("Challenge starten"):
             r = supabase.table("user_challenges").insert({"user_id": user.id}).execute()
             uc = r.data[0]
-            st.experimental_rerun()
+            st.rerun()
     if uc:
         current = uc['current_day'] if 'current_day' in uc else 1
         day = st.slider("Wähle Tag", 1, 90, current)
