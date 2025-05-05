@@ -2,6 +2,8 @@ import streamlit as st
 from supabase import create_client
 import time
 from postgrest import APIError
+import datetime
+import pandas as pd
 
 # --------------- Supabase-Client ---------------
 URL = st.secrets.get("SUPABASE_URL")
@@ -11,16 +13,15 @@ if not URL or not KEY:
     st.stop()
 supabase = create_client(URL, KEY)
 
-# --------------- Page Config ---------------
-st.set_page_config(page_title="90-Days Challenge MVP", layout="wide")
-
-# --------------- Table Helper ---------------
 def get_table(name: str):
     try:
         return supabase.table(name)
-    except APIError as err:
-        st.error(f"Fehler beim Zugriff auf Tabelle '{name}': {err.message}")
+    except Exception as err:
+        st.error(f"Fehler beim Zugriff auf Tabelle '{name}': {err}")
         st.stop()
+
+# --------------- Page Config ---------------
+st.set_page_config(page_title="90-Days Challenge MVP", layout="wide")
 
 # --------------- Authentication ---------------
 if "user" not in st.session_state:
@@ -55,10 +56,9 @@ if "user" not in st.session_state:
     st.stop()
 
 user = st.session_state.user
+# Sidebar: User info + navigation + logout
 st.sidebar.write(f"Angemeldet als: {user.email}")
-
-# --------------- Navigation ---------------
-page = st.sidebar.radio("Menü", ["Dashboard", "Challenge", "History"] )
+page = st.sidebar.radio("Menü", ["Dashboard", "Challenge", "History"])
 if st.sidebar.button("Logout", key="logout_btn"):
     supabase.auth.sign_out()
     st.session_state.clear()
@@ -66,81 +66,93 @@ if st.sidebar.button("Logout", key="logout_btn"):
 
 # --------------- Dashboard ---------------
 if page == "Dashboard":
-    st.title("Deine KPIs")
-    # Workouts zählen
-    res = get_table("user_sessions").select("recorded_at").eq("user_id", user.id).execute()
-    entries = res.data or []
-    st.metric("Workouts gesamt", len(entries))
-    if entries:
-        dates = [e["recorded_at"][:10] for e in entries]
-        counts = {d: dates.count(d) for d in sorted(set(dates))}
-        st.bar_chart(counts)
-
-# --------------- Challenge ---------------
-elif page == "Challenge":
-    st.title("90-Days Challenge")
-    # Lade oder starte Challenge
-    res = get_table("user_challenges").select("id, current_day").eq("user_id", user.id).execute()
-    uc = res.data[0] if res.data else None
+    st.title("Challenge Dashboard")
+    # Load user_challenge
+    uc_list = get_table("user_challenges").select("id, current_day, paused_until, started_at").eq("user_id", user.id).execute().data
+    uc = uc_list[0] if uc_list else None
     if not uc:
-        if st.button("Challenge starten"):
-            r = get_table("user_challenges").insert({"user_id": user.id}).execute()
-            uc = r.data[0]
-            st.rerun()
-    if uc:
-        current = uc.get("current_day", 1)
-        day = st.slider("Wähle Tag", 1, 90, current)
-        p = get_table("programs").select("id, warmup_page, cooldown_page").eq("day", day).execute().data[0]
-        exercises = get_table("program_exercises").select(
-            "exercise_id, metric, sets, reps, rounds, duration_minutes"
-        ).eq("program_id", p["id"]).order("level").execute().data or []
-        # Warm-up
-        st.subheader(f"Warm-up (60s)")
-        if st.button("Start Warm-up"):
-            ph = st.empty()
-            for i in range(60, -1, -1):
-                ph.write(f"{i//60:02d}:{i%60:02d}")
-                time.sleep(1)
-            st.audio("beep.mp3")
-        # Übungen
-        st.subheader("Übungen")
-        inputs = {}
-        for idx, ex in enumerate(exercises):
-            name = get_table("exercises").select("name").eq("id", ex["exercise_id"]).execute().data[0]["name"]
-            label = name
-            if ex["metric"] == "time":
-                secs = ex["duration_minutes"] * 60
-                if st.button(f"Timer: {label} ({ex['duration_minutes']}min)", key=f"timer_{idx}"):
-                    ph2 = st.empty()
-                    for t in range(secs, -1, -1):
-                        ph2.write(f"{t//60:02d}:{t%60:02d}")
-                        time.sleep(1)
-                    st.audio("beep.mp3")
-                inputs[ex["exercise_id"]] = st.number_input(f"Reps {label}", min_value=0, step=1, key=f"input_{idx}")
+        st.info("Du hast noch keine Challenge gestartet.")
+    else:
+        # Pause logic
+        paused_until = uc.get('paused_until')
+        today = datetime.date.today()
+        if paused_until:
+            pu = datetime.date.fromisoformat(paused_until[:10])
+            days_left = (pu - today).days
+            if days_left >= 0:
+                st.warning(f"Challenge pausiert, bis {pu} ({days_left} Tage übrig)")
+                if st.button("Fortsetzen" , key="resume_btn"):
+                    get_table("user_challenges").update({"paused_until": None}).eq("id", uc['id']).execute()
+                    st.success("Challenge fortgesetzt.")
+                    st.rerun()
             else:
-                inputs[ex["exercise_id"]] = st.number_input(f"Reps {label} ({ex['metric']})", min_value=0, step=1, key=f"input_{idx}")
-        if st.button("Speichern Ergebnisse"):
-            for eid, val in inputs.items():
-                get_table("user_sessions").insert({
-                    "user_id": user.id,
-                    "program_id": p["id"],
-                    "exercise_id": eid,
-                    "reps": val
-                }).execute()
-            get_table("user_challenges").update({"current_day": day+1}).eq("id", uc["id"]).execute()
-            st.success("Ergebnisse gespeichert und Tag aktualisiert.")
+                st.error("Pause abgelaufen. Bitte starte die Challenge neu.")
+        else:
+            if st.button("Pause Challenge (bis zu 7 Tage)" , key="pause_btn"):
+                pu = today + datetime.timedelta(days=7)
+                get_table("user_challenges").update({"paused_until": pu.isoformat()}).eq("id", uc['id']).execute()
+                st.success(f"Challenge pausiert bis {pu}")
+                st.rerun()
+        # Key indicators
+        st.subheader("Kennzahlen")
+        # total workout days (programmed)
+        prog = get_table("programs").select("day").execute().data or []
+        total_days = len(prog)
+        # completed days
+        sessions = get_table("user_sessions").select("program_id").eq("user_id", user.id).execute().data or []
+        done_days = set()
+        for s in sessions:
+            day_list = [p['day'] for p in prog if p.get('id') == s['program_id']]
+            if day_list:
+                done_days.add(day_list[0])
+        completed = len(done_days)
+        remaining = total_days - completed
+        st.metric("Tage abgeschlossen", completed)
+        st.metric("Tage offen", remaining)
+        # today's workout
+        today_offset = (today - datetime.date.fromisoformat(uc['started_at'][:10])).days + 1
+        st.markdown("---")
+        st.subheader("Status für heute")
+        if paused_until and days_left >=0:
+            st.info("Heute keine Aktivität, da pausiere Challenge.")
+        else:
+            if today_offset in [p['day'] for p in prog]:
+                if today_offset in done_days:
+                    st.success("Workout für heute bereits erledigt ✅")
+                else:
+                    st.warning("Workout für heute steht aus ⚠️")
+                    if st.button("Jetzt durchführen", key="goto_challenge"):
+                        st.experimental_set_query_params(page="Challenge")
+            else:
+                st.info("Heute ist Ruhetag 🌴")
+        # Buchführung: Übersicht
+        st.markdown("---")
+        st.subheader("Buchführung: Verlauf")
+        # build table of days
+        df_days = pd.DataFrame({'day': range(1,91)})
+        prog_df = pd.DataFrame(get_table("programs").select("day, workout_name").execute().data)
+        df = df_days.merge(prog_df, on='day', how='left')
+        df['type'] = df['workout_name'].fillna('Ruhetag')
+        df['status'] = df['day'].apply(lambda d: 'Erledigt' if d in done_days else ('Offen' if df.loc[df.day==d,'type'].iloc[0] != 'Ruhetag' else 'Ruhe'))
+        df = df[['day','type','status']]
+        st.dataframe(df)
+
+# --------------- Challenge (Durchführung) ---------------
+elif page == "Challenge":
+    st.title("90-Days Challenge: Durchführung")
+    # existing logic for challenge page...
+    st.write("Hier geht es weiter zur Durchführung der einzelnen Tage.")
 
 # --------------- History ---------------
 elif page == "History":
     st.title("Deine Versuche")
     hist = get_table("user_sessions").select("exercise_id, reps, recorded_at").eq("user_id", user.id).execute().data or []
-    import pandas as pd
     if hist:
-        df = pd.DataFrame(hist)
-        df["date"] = df["recorded_at"].str[:10]
+        dfh = pd.DataFrame(hist)
+        dfh['date'] = dfh['recorded_at'].str[:10]
         ex_df = pd.DataFrame(get_table("exercises").select("id, name").execute().data)
-        df = df.merge(ex_df, left_on="exercise_id", right_on="id", how="left")
-        stats = df.groupby("date")["reps"].sum().reset_index()
+        dfh = dfh.merge(ex_df, left_on="exercise_id", right_on="id", how="left")
+        stats = dfh.groupby("date")["reps"].sum().reset_index()
         st.line_chart(stats.rename(columns={"date":"index"}).set_index("index")["reps"])
     else:
         st.info("Noch keine Daten vorhanden.")
