@@ -24,11 +24,16 @@ if "user" not in st.session_state:
     with c1:
         if st.button("Login"):
             res = supabase.auth.sign_in_with_password({"email": email, "password": pwd})
-            if getattr(res, "user", None):
-                st.session_state.user = res.user
-                st.rerun()
+           # supabase-auth liefert hier ein Session-Objekt mit access_token
+           if getattr(res, "session", None) and getattr(res, "user", None):
+               # JWT in die Header übernehmen, damit RLS auth.uid() stimmt
+               token = res.session.access_token
+               supabase.client._client.headers.update({"Authorization": f"Bearer {token}"})
+               st.session_state.user = res.user
+               st.rerun()
             else:
                 st.error("Login fehlgeschlagen.")
+                
     with c2:
         if st.button("Register"):
             res = supabase.auth.sign_up({"email": email, "password": pwd})
