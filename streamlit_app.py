@@ -67,62 +67,81 @@ if st.sidebar.button("Logout"):
 if page == "Dashboard":
     st.title("Dashboard")
     # Load or start challenge
-    uc = get_table("user_challenges").select("id, current_day, paused_until, started_at").eq("user_id", user.id).single().execute().data
+    uc_res = get_table("user_challenges").select("id, current_day, paused_until, started_at").eq("user_id", user.id).execute()
+    uc = uc_res.data if hasattr(uc_res, 'data') else uc_res
     if not uc:
         if st.button("Challenge starten", key="start_chal"):
             new = get_table("user_challenges").insert({"user_id": user.id}).execute().data[0]
             st.success("Challenge gestartet!")
             st.rerun()
         st.stop()
-    # Controls
+    # If challenge active, allow jump-in
     st.markdown("---")
-    col_p, col_a = st.columns(2)
-    today = datetime.date.today()
-    # Pause
-    if not uc['paused_until']:
-        if col_p.button("Pause (max 7 Tage)", key="btn_pause"):
-            pu = today + datetime.timedelta(days=7)
-            get_table("user_challenges").update({"paused_until": pu.isoformat()}).eq("id", uc['id']).execute()
-            st.success(f"Pause bis {pu}")
+    st.subheader("Challenge Einstellungen")
+    col_start, col_actions = st.columns([2,1])
+    # Jump to specific day
+    with col_start:
+        new_day = st.number_input(
+            "Einsteigen ab Tag", min_value=1, max_value=90, value=uc['current_day'], step=1, key='jump_day'
+        )
+        if st.button("Tag setzen", key="set_day"):
+            get_table("user_challenges").update({"current_day": new_day}).eq("id", uc['id']).execute()
+            st.success(f"Challenge-Pointer gesetzt auf Tag {new_day}")
             st.rerun()
-    else:
-        pu = datetime.date.fromisoformat(uc['paused_until'][:10])
-        if pu >= today:
-            col_p.warning(f"Pausiert bis {pu}")
-            if col_p.button("Fortsetzen", key="btn_resume"):
-                get_table("user_challenges").update({"paused_until": None}).eq("id", uc['id']).execute()
-                st.success("Challenge fortgesetzt.")
+    # Pause/Abort actions
+    today = datetime.date.today()
+    with col_actions:
+        if not uc['paused_until']:
+            if st.button("Pause (max 7 Tage)", key="btn_pause"):
+                pu = today + datetime.timedelta(days=7)
+                get_table("user_challenges").update({"paused_until": pu.isoformat()}).eq("id", uc['id']).execute()
+                st.success(f"Pause bis {pu}")
                 st.rerun()
         else:
-            col_p.error("Pause abgelaufen.")
-    # Abort
-    if col_a.button("Challenge abbrechen"):
-        get_table("user_challenges").delete().eq("id", uc['id']).execute()
-        st.info("Challenge abgebrochen.")
-        st.rerun()
-    # KPIs
+            pu = datetime.date.fromisoformat(uc['paused_until'][:10])
+            if pu >= today:
+                st.warning(f"Pausiert bis {pu}")
+                if st.button("Fortsetzen", key="btn_resume"):
+                    get_table("user_challenges").update({"paused_until": None}).eq("id", uc['id']).execute()
+                    st.success("Challenge fortgesetzt.")
+                    st.rerun()
+            else:
+                st.error("Pause abgelaufen.")
+        if st.button("Challenge abbrechen", key="btn_abort"):
+            get_table("user_challenges").delete().eq("id", uc['id']).execute()
+            st.info("Challenge abgebrochen.")
+            st.rerun()
+    # KPIs based on challenge pointer
     st.markdown("---")
     st.subheader("Kennzahlen")
     total = len(get_table("programs").select("day").execute().data)
-    sessions = get_table("user_sessions").select("program_id").eq("user_id", user.id).execute().data or []
-    prog_list = get_table("programs").select("id, day").execute().data
-    day_map = {p['id']: p['day'] for p in prog_list}
-    done = { day_map[s['program_id']] for s in sessions if s['program_id'] in day_map }
-    st.metric("Abgeschlossen", len(done), delta=None)
-    st.metric("Verbleibend", total - len(done))
-    # Today
-    start = datetime.date.fromisoformat(uc['started_at'][:10])
-    curr = (today - start).days + 1
+    completed = uc['current_day'] - 1
+    remaining = total - completed
+    st.metric("Abgeschlossen", completed)
+    st.metric("Verbleibend", remaining)
+    # Today's status
     st.markdown("---")
     st.subheader("Heute")
-    if uc['paused_until'] and pu >= today:
+    if uc['paused_until'] and datetime.date.fromisoformat(uc['paused_until'][:10]) >= today:
         st.info("Heute pausiert.")
-    elif curr in [p['day'] for p in prog_list]:
-        st.write(f"Tag {curr}: Workout")
-        if curr in done: st.success("Erledigt")
-        else: st.warning("Ausstehend")
     else:
-        st.info("Heute Ruhetag")
+        curr = uc['current_day']
+        prog_days = [p['day'] for p in get_table("programs").select("day").execute().data]
+        if curr in prog_days:
+            st.write(f"Tag {curr}: Workout")
+            # check if user_sessions entry exists for this day
+            # map program_id to day
+            prog_map = {p['id']: p['day'] for p in get_table("programs").select("id, day").execute().data}
+            sess = get_table("user_sessions").select("program_id").eq("user_id", user.id).execute().data or []
+            done = {prog_map[s['program_id']] for s in sess if s['program_id'] in prog_map}
+            if curr in done:
+                st.success("Erledigt")
+            else:
+                st.warning("Ausstehend")
+                if st.button("Jetzt durchführen", key="goto_challenge"):
+                    st.experimental_set_query_params(page="Challenge")
+        else:
+            st.info("Heute Ruhetag")
 
 # --------------- Challenge ---------------
 elif page == "Challenge":
