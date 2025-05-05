@@ -5,14 +5,18 @@ import datetime
 import pandas as pd
 
 # --------------- Supabase-Client ---------------
+# Nutze ANON-KEY, später setzen wir JWT für Authenifizierte
 URL = st.secrets.get("SUPABASE_URL")
-# Nutze Service-Role-Key für server-seitige Writes (sichere Umgebung)
-KEY = st.secrets.get("SUPABASE_ANON_KEY")  # Service-Role-Key umgeht RLS  # Nutze nur ANON-KEY hier
+KEY = st.secrets.get("SUPABASE_ANON_KEY")
 if not URL or not KEY:
     st.error("Supabase-URL oder ANON-KEY fehlt in den Secrets.")
     st.stop()
 
 supabase = create_client(URL, KEY)
+# Wenn User-Token gespeichert, übernehme es für RLS-geschützte Requests
+token = st.session_state.get('auth_token')
+if token:
+    supabase.postgrest.auth(token)
 
 def get_table(table_name: str):
     try:
