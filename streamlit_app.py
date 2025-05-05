@@ -209,8 +209,47 @@ elif page == "Challenge":
     if not uc:
         st.info("Keine aktive Challenge. Starte eine im Dashboard.")
     else:
-        st.title(f"Challenge Tag {uc['current_day']}")
-        st.write("Workout durchführen und Ergebnisse speichern.")
+        day = uc['current_day']
+        # Programm für den aktuellen Tag laden
+        prog = get_table("programs") \
+            .select("id, workout_name") \
+            .eq("day", day) \
+            .execute().data or []
+        if not prog:
+            st.warning(f"Kein Workout für Tag {day} gefunden.")
+            st.stop()
+        program_id, workout_name = prog[0]["id"], prog[0]["workout_name"]
+        st.title(f"Tag {day}: {workout_name}")
+
+        # Alle Übungen zum Programm abrufen
+        pes = get_table("program_exercises") \
+            .select("exercise_id, level, sets, reps, rounds, duration_minutes, metric") \
+            .eq("program_id", program_id) \
+            .execute().data or []
+
+        # Übungsnamen einmalig laden
+        names = {
+            e["id"]: e["name"]
+            for e in get_table("exercises").select("id, name").execute().data or []
+        }
+
+        # Übungen anzeigen
+        for p in pes:
+            name = names.get(p["exercise_id"], "Unbekannt")
+            st.subheader(f"{name} (Level {p['level']})")
+            st.write(
+                f"Sätze: {p['sets']}, "
+                f"Reps: {p['reps']}, "
+                f"Runden: {p.get('rounds','–')}, "
+                f"Dauer: {p.get('duration_minutes','–')} min, "
+                f"Metrik: {p['metric']}"
+            )
+            detail = exercise_info.get(p["exercise_id"], {})
+            if detail.get("description"):
+                st.write(detail["description"])
+            if detail.get("focus"):
+                st.write(f"**Fokus:** {detail['focus']}")
+
 
 # --------------- Exercises Page ---------------
 elif page == "Exercises":
