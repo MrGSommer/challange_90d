@@ -67,12 +67,10 @@ def load_exercise_info():
     # exercise_details table contains: exercise_id, level, description, focus
     res = get_table("exercise_details").select("exercise_id, level, description, focus").execute()
     items = res.data if hasattr(res, 'data') else []
-    # map exercise_id to its detail record
-    return {item['exercise_id']: {
-                'level': item['level'],
-                'description': item['description'],
-                'focus': item['focus']
-            } for item in items}
+    return {item['exercise_id']: item for item in items}
+
+# assign metadata
+exercise_info = load_exercise_info()
 
 # --------------- Sidebar ---------------
 st.sidebar.write(f"Angemeldet als: {user.email}")
@@ -155,8 +153,11 @@ if page == "Dashboard":
 
 # --------------- Challenge Page ---------------
 elif page == "Challenge":
-    st.title(f"Challenge Tag {uc['current_day']}")
-    st.write("Hier Workout durchführen und Ergebnisse speichern.")
+    if not uc:
+        st.info("Keine aktive Challenge. Starte eine im Dashboard.")
+    else:
+        st.title(f"Challenge Tag {uc['current_day']}")
+        st.write("Hier Workout durchführen und Ergebnisse speichern.")
 
 # --------------- Exercises Page ---------------
 elif page == "Exercises":
