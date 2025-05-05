@@ -12,7 +12,6 @@ if not URL or not KEY:
     st.stop()
 
 supabase = create_client(URL, KEY)
-# Wenn bereits eingeloggt und Token im Session-State, für RLS nutzen
 token = st.session_state.get("auth_token")
 if token:
     supabase.postgrest.auth(token)
@@ -25,236 +24,167 @@ if "user" not in st.session_state:
     st.header("Login / Register")
     email = st.text_input("E-Mail")
     pwd = st.text_input("Passwort", type="password")
-    col_login, col_register = st.columns(2)
-    with col_login:
+    col1, col2 = st.columns(2)
+    with col1:
         if st.button("Login"):
-            auth_res = supabase.auth.sign_in_with_password({"email": email, "password": pwd})
-            session = getattr(auth_res, 'session', None)
-            userobj = getattr(auth_res, 'user', None)
-            if session and userobj:
-                st.session_state.user = userobj
+            auth = supabase.auth.sign_in_with_password({"email": email, "password": pwd})
+            session = getattr(auth, 'session', None)
+            user = getattr(auth, 'user', None)
+            if session and user:
+                st.session_state.user = user
                 st.session_state.auth_token = session.access_token
                 supabase.postgrest.auth(session.access_token)
-                st.rerun()
+                st.experimental_rerun()
             else:
                 st.error("Login fehlgeschlagen.")
-    with col_register:
+    with col2:
         if st.button("Register"):
-            reg_res = supabase.auth.sign_up({"email": email, "password": pwd})
-            if getattr(reg_res, 'user', None):
-                st.success("Account erstellt. Bitte überprüfe Deine E-Mails.")
+            reg = supabase.auth.sign_up({"email": email, "password": pwd})
+            if getattr(reg, 'user', None):
+                st.success("Account erstellt. Bitte E-Mail prüfen.")
             else:
                 st.error("Registrierung fehlgeschlagen.")
     if st.button("Passwort vergessen?"):
-        reset_res = supabase.auth.reset_password_for_email(
+        res = supabase.auth.reset_password_for_email(
             email,
-            {"redirect_to": "https://sog-challange90d-fitness.streamlit.app"}
+            {"redirect_to": st.secrets.get("APP_URL")}  # anpassen
         )
-        if getattr(reset_res, 'error', None) is None:
-            st.info("Reset-E-Mail wurde gesendet.")
+        if not getattr(res, 'error', None):
+            st.info("Reset-E-Mail gesendet.")
         else:
-            st.error("Reset fehlgeschlagen.")
+            st.error("Fehler beim Passwort-Reset.")
     st.stop()
 
 # eingeloggter User
 user = st.session_state.user
 
-# Helper: Zugriff auf Tabelle
-def get_table(table_name: str):
-    return supabase.table(table_name)
+# Helper zum Tabellenzugriff
+def get_table(name: str):
+    return supabase.table(name)
 
-# ---------------- Load Challenge State ----------------
-uc_resp = get_table("user_challenges").select(
-    "id, current_day, paused_until, started_at"
-).eq("user_id", user.id).execute()
-uc = uc_resp.data[0] if uc_resp.data else None
+# Challenge-State laden
+uc_data = get_table("user_challenges").select("id, current_day, paused_until").eq("user_id", user.id).execute().data or []
+uc = uc_data[0] if uc_data else None
 
-# ---------------- Load Exercise Metadata ----------------
-ed_resp = get_table("exercise_details").select(
-    "exercise_id, level, description, focus"
-).execute()
-exercise_info = {
-    item['exercise_id']: {
-        'level': item['level'],
-        'description': item['description'],
-        'focus': item['focus']
-    }
-    for item in (ed_resp.data or [])
-}
+# Exercise Metadata laden
+ed = get_table("exercise_details").select("exercise_id, level, description, focus").execute().data or []
+exercise_info = {x['exercise_id']: x for x in ed}
 
-# ---------------- Sidebar & Level-Auswahl ----------------
-st.sidebar.write(f"Angemeldet als: {user.email}")
+# Sidebar mit Level-Auswahl
+st.sidebar.write(f"Angemeldet: {user.email}")
 st.sidebar.subheader("Training-Level")
-level_options = [1, 2, 3]
-default_lvl = st.session_state.get("selected_level", 1)
-selected_level = st.sidebar.selectbox(
-    "Wähle Dein Level", level_options,
-    index=level_options.index(default_lvl)
-)
-st.session_state.selected_level = selected_level
-
-pages = ["Dashboard", "Challenge", "Exercises", "History"]
-page = st.sidebar.radio("Menü", pages)
+levels = [1,2,3]
+def_lvl = st.session_state.get("level",1)
+sel = st.sidebar.selectbox("Level", levels, index=levels.index(def_lvl))
+st.session_state.level = sel
+page = st.sidebar.radio("Menü", ["Dashboard","Challenge","Exercises","History"])
 if st.sidebar.button("Logout"):
     supabase.auth.sign_out()
     st.session_state.clear()
-    st.rerun()
+    st.experimental_rerun()
 
-# ---------------- Dashboard ----------------
+# Dashboard
 if page == "Dashboard":
     st.title("Dashboard")
     if not uc:
         if st.button("Challenge starten"):
-            try:
-                new_uc = get_table("user_challenges").insert({"user_id": user.id}).execute().data[0]
-                st.success("Challenge gestartet.")
-                st.rerun()
-            except APIError as e:
-                st.error(f"RLS-Fehler: {e.message}")
+            get_table("user_challenges").insert({"user_id": user.id}).execute()
+            st.experimental_rerun()
         st.stop()
-
     st.markdown("---")
-    st.subheader("Challenge Steuerung")
-    col1, col2 = st.columns([3, 1])
+    st.subheader("Challenge-Steuerung")
+    c1, c2 = st.columns([3,1])
     today = datetime.date.today()
-    with col1:
-        new_day = st.number_input(
-            "Einsteigen ab Tag", min_value=1, max_value=90,
-            value=uc['current_day']
-        )
-        if st.button("Setze Tag"):
-            get_table("user_challenges").update({"current_day": new_day}).eq("id", uc['id']).execute()
-            st.success(f"Tag gesetzt auf {new_day}.")
-            st.rerun()
-    with col2:
-        pu_iso = uc.get('paused_until')
-        if not pu_iso:
-            if st.button("Pause (7 Tage)"):
-                pu = today + datetime.timedelta(days=7)
-                get_table("user_challenges").update({"paused_until": pu.isoformat()}).eq("id", uc['id']).execute()
-                st.success(f"Pause bis {pu}.")
-                st.rerun()
+    with c1:
+        nd = st.number_input("Tag setzen",1,90,value=uc['current_day'])
+        if st.button("Setzen"):
+            get_table("user_challenges").update({"current_day": nd}).eq("id", uc['id']).execute()
+            st.experimental_rerun()
+    with c2:
+        pu = uc.get('paused_until')
+        if not pu:
+            if st.button("Pause 7 Tage"):
+                dt = today + datetime.timedelta(days=7)
+                get_table("user_challenges").update({"paused_until": dt.isoformat()}).eq("id", uc['id']).execute()
+                st.experimental_rerun()
         else:
-            pu = datetime.date.fromisoformat(pu_iso[:10])
-            if pu >= today:
-                st.warning(f"Pausiert bis {pu}.")
-                if st.button("Fortsetzen"):
-                    get_table("user_challenges").update({"paused_until": None}).eq("id", uc['id']).execute()
-                    st.success("Challenge fortgesetzt.")
-                    st.rerun()
-            else:
-                st.error("Pause abgelaufen.")
-        if st.button("Abbrechen"):
-            get_table("user_challenges").delete().eq("id", uc['id']).execute()
-            st.info("Challenge abgebrochen.")
-            st.rerun()
-
+            dd = datetime.date.fromisoformat(pu[:10])
+            st.info(f"Pausiert bis {dd}")
     st.markdown("---")
-    st.subheader("Kennzahlen")
-    total_days = len(get_table("programs").select("day").execute().data or [])
-    completed = uc['current_day'] - 1
-    st.metric("Abgeschlossen", completed)
-    st.metric("Verbleibend", total_days - completed)
+    st.metric("Aktueller Tag", uc['current_day'])
 
-    st.markdown("---")
-    st.subheader("Status heute")
-    if uc.get('paused_until'):
-        pu = datetime.date.fromisoformat(uc['paused_until'][:10])
-        if pu >= today:
-            st.info("Heute pausiert.")
-        else:
-            st.info("Pause abgelaufen.")
-    else:
-        curr = uc['current_day']
-        days = [p['day'] for p in (get_table("programs").select("day").execute().data or [])]
-        if curr in days:
-            st.write(f"Tag {curr}: Workout")
-            prog_map = {p['id']: p['day'] for p in (get_table("programs").select("id, day").execute().data or [])}
-            sessions = get_table("user_sessions").select("program_id").eq("user_id", user.id).execute().data or []
-            done = {prog_map.get(s['program_id']) for s in sessions}
-            if curr in done:
-                st.success("Erledigt")
-            else:
-                st.warning("Ausstehend")
-                if st.button("Jetzt durchführen"):
-                    st.query_params.clear()
-                    st.query_params.update({"page": "Challenge"})
-                    st.rerun()
-        else:
-            st.info("Heute Ruhetag.")
-
-# ---------------- Challenge Page ----------------
+# Challenge Page
 elif page == "Challenge":
     if not uc:
-        st.info("Keine aktive Challenge. Starte eine im Dashboard.")
-    else:
-        day = uc['current_day']
-        prog = get_table("programs").select("id, workout_name").eq("day", day).execute().data or []
-        if not prog:
-            st.warning(f"Kein Workout für Tag {day} gefunden.")
-            st.stop()
-        pid, workout_name = prog[0]['id'], prog[0]['workout_name']
-        st.title(f"Tag {day}: {workout_name}")
+        st.info("Keine Challenge aktiv.")
+        st.stop()
+    day = uc['current_day']
+    prog = get_table("programs").select("id, workout_name").eq("day", day).execute().data
+    if not prog:
+        st.warning("Kein Workout für diesen Tag.")
+        st.stop()
+    pid, title = prog[0]['id'], prog[0]['workout_name']
+    st.title(f"Tag {day}: {title}")
 
-        pes = get_table("program_exercises").select(
-            "exercise_id, level, sets, reps, rounds, duration_minutes, metric"
-        ).eq("program_id", pid).execute().data or []
+    # Übungen abrufen\    
+pes = get_table("program_exercises").select(
+        "exercise_id, level, sets, reps, rounds, duration_minutes, metric"
+    ).eq("program_id", pid).execute().data or []
+    names = {e['id']: e['name'] for e in get_table("exercises").select("id, name").execute().data}
 
-        names = {e['id']: e['name'] for e in get_table("exercises").select("id, name").execute().data or []}
-
-        filtered = []
-        for eid in {p['exercise_id'] for p in pes}:
-            candidates = [p for p in pes if p['exercise_id']==eid and p['level']<=selected_level]
-            if not candidates:
-                candidates = [p for p in pes if p['level']==1]
-            best = max(candidates, key=lambda x: x['level'])
-            filtered.append(best)
-
-        if not filtered:
-            st.info("Noch keine Übungen für Dein Level definiert.")
+    # Auswahl pro Übung basierend auf Level mit Fallback\    
+pick = []
+    for eid in {p['exercise_id'] for p in pes}:
+        group = [p for p in pes if p['exercise_id']==eid]
+        exact = [p for p in group if p['level']==sel]
+        if exact:
+            ch = exact[0]
         else:
-            cols = st.columns(2)
-            for i, p in enumerate(filtered):
-                col = cols[i % 2]
-                with col:
-                    name = names.get(p['exercise_id'], "Unbekannt")
-                    st.markdown(f"#### {name} (Level {p['level']})")
-                    st.write(
-                        f"Sätze: {p.get('sets', '–')}, Reps: {p.get('reps', '–')}, "
-                        f"Runden: {p.get('rounds', '–')}, Dauer: {p.get('duration_minutes', '–')} min, "
-                        f"Metrik: {p.get('metric', '–')}"
-                    )
-                    detail = exercise_info.get(p['exercise_id'], {})
-                    if detail.get('description'):
-                        st.write(detail['description'])
-                    if detail.get('focus'):
-                        st.write(f"**Fokus:** {detail['focus']}")
+            higher = sorted([p for p in group if p['level']>sel], key=lambda x: x['level'])
+            ch = higher[0] if higher else min(group, key=lambda x: x['level'])
+        pick.append(ch)
 
-# ---------------- Exercises Page ----------------
+    # Exakte Reihenfolge festlegen per exercise_id
+    exercise_order = {104: 0, 107: 1, 89: 2, 95: 3}
+    pick = sorted(pick, key=lambda p: exercise_order.get(p['exercise_id'], 99))
+
+    # Darstellung\    
+    for p in pick:
+        nm = names.get(p['exercise_id'], "Unbekannt")
+        st.subheader(f"{nm} (Level {p['level']})")
+        parts = []
+        if p.get('sets') is not None: parts.append(f"Sätze: {p['sets']}")
+        if p.get('reps') is not None: parts.append(f"Reps: {p['reps']}")
+        if p.get('rounds') is not None: parts.append(f"Runden: {p['rounds']}")
+        if p.get('duration_minutes') is not None: parts.append(f"Dauer: {p['duration_minutes']} min")
+        if p.get('metric'): parts.append(f"Metrik: {p['metric']}")
+        if parts:
+            st.write(", ".join(parts))
+        det = exercise_info.get(p['exercise_id'], {})
+        if det.get('description'): st.write(det['description'])
+        if det.get('focus'): st.write(f"**Fokus:** {det['focus']}")
+
+# Exercises Page
 elif page == "Exercises":
     st.title("Alle Übungen")
-    exercises = get_table("exercises").select("id, name").execute().data or []
-    for ex in exercises:
+    exs = get_table("exercises").select("id, name").execute().data or []
+    for ex in exs:
         info = exercise_info.get(ex['id'], {})
         st.subheader(f"{ex['name']} (Level {info.get('level','?')})")
-        if info.get('description'):
-            st.write(info['description'])
-        if info.get('focus'):
-            st.write(f"**Fokus:** {info['focus']}")
+        if info.get('description'): st.write(info['description'])
+        if info.get('focus'): st.write(f"**Fokus:** {info['focus']}")
         st.markdown("---")
 
-# ---------------- History ----------------
+# History Page
 elif page == "History":
     st.title("History")
-    history = get_table("user_sessions").select(
-        "exercise_id, reps, recorded_at"
-    ).eq("user_id", user.id).execute().data or []
-    if history:
-        df = pd.DataFrame(history)
+    his = get_table("user_sessions").select("exercise_id, reps, recorded_at").eq("user_id", user.id).execute().data or []
+    if his:
+        df = pd.DataFrame(his)
         df['date'] = df['recorded_at'].str[:10]
         names = pd.DataFrame(get_table("exercises").select("id, name").execute().data)
         df = df.merge(names, left_on="exercise_id", right_on="id")
         chart = df.groupby('date')['reps'].sum().reset_index()
         st.line_chart(chart.rename(columns={'date':'index'}).set_index('index')['reps'])
     else:
-        st.info("Noch keine Daten vorhanden.")
+        st.info("Noch keine Daten.")
