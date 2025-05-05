@@ -7,7 +7,7 @@ import pandas as pd
 # --------------- Supabase-Client ---------------
 URL = st.secrets.get("SUPABASE_URL")
 # Nutze Service-Role-Key für server-seitige Writes (sichere Umgebung)
-KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY")  # Service-Role-Key umgeht RLS  # Nutze nur ANON-KEY hier
+KEY = st.secrets.get("SUPABASE_ANON_KEY")  # Service-Role-Key umgeht RLS  # Nutze nur ANON-KEY hier
 if not URL or not KEY:
     st.error("Supabase-URL oder ANON-KEY fehlt in den Secrets.")
     st.stop()
